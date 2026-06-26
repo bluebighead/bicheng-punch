@@ -1,10 +1,10 @@
-# 备考打卡 (BiCheng Punch)
+# 笔程打卡 (BiCheng Punch)
 
 > 一款面向备考人群的轻量级打卡 App，帮助你在考研、考公、教资等备考路上保持习惯、专注学习。
 
 ## 项目简介
 
-**备考打卡** 是一个基于 Flutter 开发的跨平台移动应用，专注于解决备考过程中的三个核心需求：
+**笔程打卡** 是一个基于 Flutter 开发的跨平台移动应用，专注于解决备考过程中的三个核心需求：
 
 - **习惯养成** — 创建学习习惯，每日打卡追踪
 - **专注计时** — 番茄钟 + 白噪音，提升学习效率
@@ -118,8 +118,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone <repo-url>
-cd kaobei_punch
+git clone https://github.com/bluebighead/bicheng-punch.git
+cd bicheng-punch
 
 # 2. 安装 Flutter 依赖
 flutter pub get
