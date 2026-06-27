@@ -28,6 +28,53 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  // ===== 批量操作状态 =====
+  /// 是否处于批量操作模式
+  bool _batchMode = false;
+
+  /// 选中的习惯 ID 集合
+  final Set<String> _selectedIds = <String>{};
+
+  /// 进入批量操作模式
+  void _enterBatchMode() {
+    setState(() {
+      _batchMode = true;
+      _selectedIds.clear();
+    });
+  }
+
+  /// 退出批量操作模式
+  void _exitBatchMode() {
+    setState(() {
+      _batchMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  /// 切换单个习惯的选中状态
+  void _toggleSelect(String habitId) {
+    setState(() {
+      if (_selectedIds.contains(habitId)) {
+        _selectedIds.remove(habitId);
+      } else {
+        _selectedIds.add(habitId);
+      }
+    });
+  }
+
+  /// 全选/取消全选（基于当前 todayHabits）
+  void _toggleSelectAll(List<Habit> todayHabits) {
+    setState(() {
+      if (_selectedIds.length == todayHabits.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(todayHabits.map((h) => h.id));
+      }
+    });
+  }
+
   /// 刷新数据
   void _refreshData() {
     context.read<HabitProvider>().loadHabits();
@@ -53,19 +100,31 @@ class _HomePageState extends State<HomePage> {
     final habitProvider = context.watch<HabitProvider>();
     final checkInProvider = context.watch<CheckInProvider>();
 
-    // 今日需打卡的习惯列表
+    // 今日需打卡的习惯列表（HabitProvider 已缓存，O(1)）
     final todayHabits = habitProvider.getTodayHabits();
 
+    // 今日已打卡习惯 ID 集合（CheckInProvider 已缓存，O(1) 查询）
+    // 性能优化：原对每个 habit 调用 isCheckedIn 逐个 .any() 遍历全部 checkIns，
+    // 现改为一次性获取今日打卡 Set，查询 O(1)
+    final todayCheckedIds = checkInProvider.getTodayCheckedHabitIds();
+
     // 今日已打卡数量
-    final todayCheckedCount = todayHabits.where((h) =>
-        checkInProvider.isCheckedIn(h.id, DateTime.now())).length;
+    final todayCheckedCount =
+        todayHabits.where((h) => todayCheckedIds.contains(h.id)).length;
 
     // 今日完成率
     final todayCompletionRate = todayHabits.isEmpty
         ? 0.0
         : todayCheckedCount / todayHabits.length;
 
-    return Scaffold(
+    return PopScope(
+      // 批量模式下拦截返回键，改为退出批量模式而非离开页面
+      canPop: !_batchMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _exitBatchMode();
+      },
+      child: Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.add_circle_outline),
@@ -113,16 +172,31 @@ class _HomePageState extends State<HomePage> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('今日待打卡', style: theme.textTheme.titleLarge),
-                        if (todayHabits.isNotEmpty)
-                          Text(
-                            '$todayCheckedCount/${todayHabits.length}',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: AppColors.primary,
-                            ),
+                        if (todayHabits.isNotEmpty && !_batchMode)
+                          Row(
+                            children: [
+                              Text(
+                                '$todayCheckedCount/${todayHabits.length}',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // 批量操作按钮
+                              IconButton(
+                                icon: const Icon(Icons.checklist, size: 22),
+                                tooltip: '批量操作',
+                                onPressed: _enterBatchMode,
+                              ),
+                            ],
                           ),
                       ],
                     ),
                     const SizedBox(height: 12),
+
+                    // ===== 批量操作工具条（仅批量模式下显示）=====
+                    if (_batchMode)
+                      _buildBatchToolbar(theme, todayHabits),
 
                     // 习惯卡片列表或空状态
                     if (habitProvider.isLoading)
@@ -135,53 +209,7 @@ class _HomePageState extends State<HomePage> {
                     else if (todayHabits.isEmpty)
                       _buildEmptyState(theme)
                     else
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: todayHabits.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final habit = todayHabits[index];
-                          final isCheckedIn =
-                              checkInProvider.isCheckedIn(habit.id, DateTime.now());
-                          final checkIn =
-                              checkInProvider.getCheckIn(habit.id, DateTime.now());
-
-                          // 左滑删除：使用 Dismissible 实现动画效果
-                          return RepaintBoundary(
-                            child: Dismissible(
-                            key: ValueKey('habit_${habit.id}'),
-                            direction: DismissDirection.endToStart,
-                            confirmDismiss: (direction) async {
-                              return await _showDeleteConfirmDialog(context, habit);
-                            },
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              decoration: BoxDecoration(
-                                color: AppColors.error,
-                                borderRadius: BorderRadius.circular(AppTheme.radiusM),
-                              ),
-                              child: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                            ),
-                            onDismissed: (direction) {
-                              _deleteHabit(habit);
-                            },
-                            child: HabitCard(
-                              habit: habit,
-                              isCheckedIn: isCheckedIn,
-                              checkIn: checkIn,
-                              onTap: () => _onHabitTap(habit, isCheckedIn),
-                              onLongPress: () => _showHabitDetail(habit, checkIn),
-                            ),
-                          ),
-                          );
-                        },
-                      ),
+                      _buildGroupedHabitList(theme, todayHabits, checkInProvider, todayCheckedIds),
                   ],
                 ),
               ),
@@ -189,6 +217,7 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 24),
             ],
           ),
+        ),
         ),
       ),
     );
@@ -246,6 +275,281 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 构建批量操作工具条
+  ///
+  /// 包含：全选/取消全选、删除选中、退出批量模式
+  Widget _buildBatchToolbar(ThemeData theme, List<Habit> todayHabits) {
+    final allSelected = todayHabits.isNotEmpty &&
+        _selectedIds.length == todayHabits.length;
+    final selectedCount = _selectedIds.length;
+
+    // 选中的习惯中，属于自定义分类（examCategory == custom）的数量
+    // 仅自定义习惯可被重新分组，故据此决定「分类组命名」按钮是否可用
+    final selectedCustomCount = todayHabits
+        .where((h) =>
+            _selectedIds.contains(h.id) &&
+            h.examCategory == ExamCategory.custom)
+        .length;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.15),
+        borderRadius: const BorderRadius.all(Radius.circular(AppTheme.radiusM)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 第一行：全选 / 退出
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => _toggleSelectAll(todayHabits),
+                icon: Icon(
+                  allSelected ? Icons.deselect : Icons.select_all,
+                  size: 20,
+                ),
+                label: Text(allSelected ? '取消全选' : '全选'),
+              ),
+              const Spacer(),
+              if (selectedCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    '已选 $selectedCount',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              // 退出批量模式
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                tooltip: '退出批量操作',
+                onPressed: _exitBatchMode,
+              ),
+            ],
+          ),
+          // 第二行：删除 / 分类组命名（选中数 > 0 时显示）
+          if (selectedCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  // 分类组命名按钮：仅当选中项含自定义习惯时可用
+                  TextButton.icon(
+                    onPressed: selectedCustomCount > 0
+                        ? () => _showCategoryNameDialog(todayHabits)
+                        : null,
+                    icon: const Icon(Icons.folder_outlined, size: 20),
+                    label: Text(
+                      selectedCustomCount > 0
+                          ? '分类组命名($selectedCustomCount)'
+                          : '分类组命名',
+                    ),
+                  ),
+                  const Spacer(),
+                  // 删除按钮
+                  TextButton.icon(
+                    onPressed: () => _confirmBatchDelete(todayHabits),
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    label: Text('删除($selectedCount)'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 批量删除确认对话框
+  ///
+  /// 二次确认后删除所有选中的习惯及其打卡记录
+  void _confirmBatchDelete(List<Habit> todayHabits) {
+    final selectedHabits = todayHabits
+        .where((h) => _selectedIds.contains(h.id))
+        .toList();
+
+    if (selectedHabits.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('批量删除'),
+        content: Text(
+          '确定删除选中的 ${selectedHabits.length} 个习惯吗？\n'
+          '删除后将同时清除这些习惯的所有打卡记录。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _performBatchDelete(selectedHabits);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.error,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 执行批量删除
+  ///
+  /// 遍历选中习惯，逐个删除其打卡记录与习惯本身，完成后退出批量模式
+  void _performBatchDelete(List<Habit> habits) {
+    final checkInProvider = context.read<CheckInProvider>();
+    final habitProvider = context.read<HabitProvider>();
+
+    for (final habit in habits) {
+      // 清理该习惯的所有打卡记录
+      final habitCheckIns = checkInProvider.getCheckInsByHabit(habit.id);
+      for (final checkIn in habitCheckIns) {
+        checkInProvider.cancelCheckIn(checkIn.id);
+      }
+      // 删除习惯
+      habitProvider.removeHabit(habit.id);
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已删除 ${habits.length} 个习惯'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    // 退出批量模式
+    _exitBatchMode();
+  }
+
+  /// 显示「分类组命名」对话框
+  ///
+  /// 仅对选中的自定义习惯（examCategory == custom）生效：
+  /// 用户输入新的分类组名称后，选中的自定义习惯归入该组；
+  /// 未选中的习惯保持原分组不变。
+  void _showCategoryNameDialog(List<Habit> todayHabits) {
+    // 筛选出选中的自定义习惯
+    final selectedCustomHabits = todayHabits
+        .where((h) =>
+            _selectedIds.contains(h.id) &&
+            h.examCategory == ExamCategory.custom)
+        .toList();
+
+    if (selectedCustomHabits.isEmpty) return;
+
+    final theme = Theme.of(context);
+    final controller = TextEditingController();
+    // 收集已存在的自定义分类组名称，供用户参考
+    final existingGroups = <String>{};
+    for (final h in todayHabits) {
+      final cat = h.customCategory?.trim();
+      if (cat != null && cat.isNotEmpty && cat != kDefaultCustomGroupName) {
+        existingGroups.add(cat);
+      }
+    }
+
+    showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('分类组命名'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '将选中的 ${selectedCustomHabits.length} 个自定义打卡项归入新的分类组：',
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 12,
+                decoration: const InputDecoration(
+                  labelText: '分类组名称',
+                  hintText: '例如：日常、阅读、运动',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.folder_outlined),
+                ),
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(12),
+                ],
+              ),
+              if (existingGroups.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '已有分类组：${existingGroups.join('、')}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: AppColors.textHint,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            // 取消按钮：关闭弹窗，不执行任何操作
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            // 确定按钮：校验非空后执行分组
+            FilledButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('请输入分类组名称'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, name);
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    ).then((result) {
+      controller.dispose();
+      if (result == null) return;
+      _performCategorize(selectedCustomHabits, result);
+    });
+  }
+
+  /// 执行分类组设置
+  ///
+  /// 将选中的自定义习惯的 customCategory 设置为 [categoryName]，
+  /// 完成后退出批量模式。
+  Future<void> _performCategorize(
+      List<Habit> habits, String categoryName) async {
+    final habitProvider = context.read<HabitProvider>();
+    final ids = habits.map((h) => h.id).toList();
+    await habitProvider.setCustomCategoryForHabits(ids, categoryName);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已将 ${habits.length} 个打卡项归入「$categoryName」'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    // 退出批量模式
+    _exitBatchMode();
+  }
+
   /// 构建空状态提示
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
@@ -268,6 +572,234 @@ class _HomePageState extends State<HomePage> {
               textAlign: TextAlign.center,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ===== 分类分组渲染 =====
+
+  /// 模板备考分类的展示顺序（考研 → 考公 → 教资 → 四六级）
+  ///
+  /// 自定义分类组（含默认「自定义」组）排在模板分类之后。
+  static const List<ExamCategory> _templateCategoryOrder = [
+    ExamCategory.kaoyan,
+    ExamCategory.kaogong,
+    ExamCategory.jiaozhi,
+    ExamCategory.cet4cet6,
+  ];
+
+  /// 将习惯按显示分类分组，并按固定顺序排列
+  ///
+  /// 排列规则：
+  /// 1. 模板分类（考研/考公/教资/四六级）按 [_templateCategoryOrder] 顺序排列
+  /// 2. 用户自定义分类组（customCategory 非空）按首次出现顺序排列
+  /// 3. 默认「自定义」组排在最后
+  ///
+  /// 返回有序的 (分类名, 该分类下的习惯列表) 列表。
+  List<MapEntry<String, List<Habit>>> _groupHabitsByCategory(
+      List<Habit> habits) {
+    // 按显示分类名聚合
+    final Map<String, List<Habit>> bucket = {};
+    // 记录自定义分类组的首次出现顺序
+    final List<String> customGroupOrder = [];
+
+    for (final habit in habits) {
+      final name = habitDisplayCategory(habit);
+      bucket.putIfAbsent(name, () => []);
+      bucket[name]!.add(habit);
+
+      // 记录自定义分类组顺序（排除模板分类名与默认「自定义」）
+      if (habit.examCategory == ExamCategory.custom &&
+          name != kDefaultCustomGroupName &&
+          !customGroupOrder.contains(name)) {
+        customGroupOrder.add(name);
+      }
+    }
+
+    // 组装有序结果
+    final result = <MapEntry<String, List<Habit>>>[];
+
+    // 1. 模板分类（按固定顺序）
+    for (final cat in _templateCategoryOrder) {
+      final name = examCategoryNames[cat]!;
+      if (bucket.containsKey(name)) {
+        result.add(MapEntry(name, bucket[name]!));
+      }
+    }
+
+    // 2. 用户自定义分类组（按首次出现顺序）
+    for (final name in customGroupOrder) {
+      if (bucket.containsKey(name)) {
+        result.add(MapEntry(name, bucket[name]!));
+      }
+    }
+
+    // 3. 默认「自定义」组（最后）
+    if (bucket.containsKey(kDefaultCustomGroupName)) {
+      result.add(MapEntry(kDefaultCustomGroupName, bucket[kDefaultCustomGroupName]!));
+    }
+
+    return result;
+  }
+
+  /// 判断是否需要显示分类组标题
+  ///
+  /// 规则：只要存在任意非默认「自定义」组的习惯（模板分类或用户自定义分类组），
+  /// 就显示所有分类组标题；若全部习惯都属于默认「自定义」组，则不显示标题（平铺展示）。
+  bool _shouldShowCategoryHeaders(List<Habit> habits) {
+    for (final h in habits) {
+      if (!isHabitInDefaultCustomGroup(h)) return true;
+    }
+    return false;
+  }
+
+  /// 构建分组后的习惯列表
+  ///
+  /// 根据是否显示分类标题，渲染分组标题 + 习惯卡片。
+  /// 批量模式下卡片切换为选中态，非批量模式保留左滑删除。
+  Widget _buildGroupedHabitList(
+    ThemeData theme,
+    List<Habit> todayHabits,
+    CheckInProvider checkInProvider,
+    Set<String> todayCheckedIds,
+  ) {
+    final groups = _groupHabitsByCategory(todayHabits);
+    final showHeaders = _shouldShowCategoryHeaders(todayHabits);
+
+    final children = <Widget>[];
+
+    for (var i = 0; i < groups.length; i++) {
+      final entry = groups[i];
+      final categoryName = entry.key;
+      final groupHabits = entry.value;
+
+      // 分类标题（按需显示）
+      if (showHeaders) {
+        if (i > 0) children.add(const SizedBox(height: 16));
+        children.add(_buildCategoryHeader(theme, categoryName, groupHabits));
+        children.add(const SizedBox(height: 8));
+      } else if (i > 0) {
+        // 不显示标题时，组与组之间仍保留间距
+        children.add(const SizedBox(height: 12));
+      }
+
+      // 该分组下的习惯卡片
+      for (var j = 0; j < groupHabits.length; j++) {
+        if (j > 0) children.add(const SizedBox(height: 12));
+        children.add(_buildHabitCardItem(theme, checkInProvider, groupHabits[j], todayCheckedIds));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  /// 构建单个分类组标题
+  Widget _buildCategoryHeader(
+      ThemeData theme, String categoryName, List<Habit> groupHabits) {
+    final isDefault = categoryName == kDefaultCustomGroupName;
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 16,
+          decoration: BoxDecoration(
+            color: isDefault ? AppColors.textHint : AppColors.primary,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          categoryName,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: isDefault ? AppColors.textSecondary : AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: AppColors.divider,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '${groupHabits.length}',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建单个习惯卡片（批量模式/普通模式）
+  ///
+  /// 性能优化：接收 [todayCheckedIds] 缓存集合，用 Set.contains O(1) 查询
+  /// 替代原 isCheckedIn 的 .any() 遍历。
+  Widget _buildHabitCardItem(
+    ThemeData theme,
+    CheckInProvider checkInProvider,
+    Habit habit,
+    Set<String> todayCheckedIds,
+  ) {
+    final isCheckedIn = todayCheckedIds.contains(habit.id);
+    // getCheckIn 需返回对象，保留原方法（仅打卡状态查询已优化）
+    final checkIn = isCheckedIn
+        ? checkInProvider.getCheckIn(habit.id, DateTime.now())
+        : null;
+    final isSelected = _selectedIds.contains(habit.id);
+
+    // 批量模式下：禁用左滑删除，点击卡片切换选中而非打卡
+    if (_batchMode) {
+      return RepaintBoundary(
+        child: HabitCard(
+          habit: habit,
+          isCheckedIn: isCheckedIn,
+          checkIn: checkIn,
+          batchMode: true,
+          isSelected: isSelected,
+          onSelectToggle: () => _toggleSelect(habit.id),
+          onTap: () => _toggleSelect(habit.id),
+          onLongPress: () {},
+        ),
+      );
+    }
+
+    // 非批量模式：保留左滑删除与打卡点击
+    return RepaintBoundary(
+      child: Dismissible(
+        key: ValueKey('habit_${habit.id}'),
+        direction: DismissDirection.endToStart,
+        confirmDismiss: (direction) async {
+          return await _showDeleteConfirmDialog(context, habit);
+        },
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+            color: AppColors.error,
+            borderRadius: BorderRadius.circular(AppTheme.radiusM),
+          ),
+          child: const Icon(
+            Icons.delete_outline,
+            color: Colors.white,
+            size: 28,
+          ),
+        ),
+        onDismissed: (direction) {
+          _deleteHabit(habit);
+        },
+        child: HabitCard(
+          habit: habit,
+          isCheckedIn: isCheckedIn,
+          checkIn: checkIn,
+          onTap: () => _onHabitTap(habit, isCheckedIn),
+          onLongPress: () => _showHabitDetail(habit, checkIn),
         ),
       ),
     );

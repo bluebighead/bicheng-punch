@@ -22,6 +22,9 @@ class AudioService {
   double _volume = 0.5; // 默认音量 50%
   bool _isPlaying = false;
 
+  /// 提示音播放完成的回调（由 FocusProvider 设置，用于重置试听状态）
+  VoidCallback? onCompletionSoundComplete;
+
   /// 当前播放的白噪音类型
   WhiteNoiseType? get currentNoise => _currentNoise;
 
@@ -38,6 +41,30 @@ class AudioService {
     WhiteNoiseType.music: 'assets/audio/music.mp3',
   };
 
+  /// 铃声音频资源映射
+  static const Map<RingtoneType, String> _ringtoneAssets = {
+    RingtoneType.classic: 'assets/audio/complete.mp3',
+    RingtoneType.gentle: 'assets/audio/gentle.mp3',
+    RingtoneType.digital: 'assets/audio/digital.mp3',
+    RingtoneType.nature: 'assets/audio/nature.mp3',
+  };
+
+  /// 铃声名称映射（用于 UI 显示）
+  static const Map<RingtoneType, String> ringtoneNames = {
+    RingtoneType.classic: '经典提示音',
+    RingtoneType.gentle: '轻柔铃声',
+    RingtoneType.digital: '数字闹铃',
+    RingtoneType.nature: '自然风铃',
+  };
+
+  /// 铃声图标映射（用于 UI 显示）
+  static const Map<RingtoneType, IconData> ringtoneIcons = {
+    RingtoneType.classic: Icons.notifications_active,
+    RingtoneType.gentle: Icons.music_note,
+    RingtoneType.digital: Icons.alarm,
+    RingtoneType.nature: Icons.forest,
+  };
+
   /// 初始化音频服务
   Future<void> init() async {
     // 设置循环播放
@@ -46,6 +73,11 @@ class AudioService {
     // 设置默认音量
     await _whiteNoisePlayer.setVolume(_volume);
     await _completionPlayer.setVolume(0.7);
+
+    // 监听提示音播放完成事件，通知上层重置试听状态
+    _completionPlayer.onPlayerComplete.listen((_) {
+      onCompletionSoundComplete?.call();
+    });
 
     debugPrint('AudioService 初始化完成');
   }
@@ -130,15 +162,53 @@ class AudioService {
   }
 
   /// 播放完成提示音
-  Future<void> playCompletionSound() async {
+  ///
+  /// [ringtone] 可选，指定铃声类型，默认为经典提示音
+  Future<void> playCompletionSound([RingtoneType ringtone = RingtoneType.classic]) async {
     try {
       await _completionPlayer.stop();
-      await _completionPlayer.setSource(AssetSource('audio/complete.mp3'));
+
+      final asset = _ringtoneAssets[ringtone]!;
+      await _completionPlayer.setSource(
+        AssetSource(asset.replaceFirst('assets/', '')),
+      );
       await _completionPlayer.setVolume(0.7);
       await _completionPlayer.resume();
-      debugPrint('播放完成提示音');
+      debugPrint('播放完成提示音: ${ringtone.name}');
     } catch (e) {
       debugPrint('播放完成提示音失败: $e (资源文件可能不存在)');
+      // 降级：如果指定铃声不存在，尝试播放默认铃声
+      if (ringtone != RingtoneType.classic) {
+        debugPrint('降级播放默认提示音');
+        await playCompletionSound(RingtoneType.classic);
+      }
+    }
+  }
+
+  /// 从本地文件播放完成提示音（自定义铃声）
+  ///
+  /// [filePath] 本地音频文件的绝对路径
+  Future<void> playCompletionSoundFromFile(String filePath) async {
+    try {
+      await _completionPlayer.stop();
+      await _completionPlayer.setSource(DeviceFileSource(filePath));
+      await _completionPlayer.setVolume(0.7);
+      await _completionPlayer.resume();
+      debugPrint('播放自定义铃声: $filePath');
+    } catch (e) {
+      debugPrint('播放自定义铃声失败: $e');
+      // 降级播放默认提示音
+      await playCompletionSound(RingtoneType.classic);
+    }
+  }
+
+  /// 停止预览播放
+  Future<void> stopPreview() async {
+    try {
+      await _completionPlayer.stop();
+      debugPrint('停止预览播放');
+    } catch (e) {
+      debugPrint('停止预览播放失败: $e');
     }
   }
 

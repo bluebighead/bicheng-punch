@@ -24,12 +24,16 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
   /// 5 个一级页面（const 构造，IndexedStack 复用，切换流畅）
-  static const List<Widget> _pages = <Widget>[
-    HomePage(),
-    FocusPage(),
-    StatsPage(),
-    GroupPage(),
-    ProfilePage(),
+  ///
+  /// 性能优化：每个页面外层包裹 [RepaintBoundary]，
+  /// 在主题切换（整树重建）或某一页notifyListeners时，
+  /// 限制重绘范围避免波及其他页面，减少 GPU 合成开销。
+  static final List<Widget> _pages = <Widget>[
+    RepaintBoundary(child: HomePage()),
+    RepaintBoundary(child: FocusPage()),
+    RepaintBoundary(child: StatsPage()),
+    RepaintBoundary(child: GroupPage()),
+    RepaintBoundary(child: ProfilePage()),
   ];
 
   /// 底部导航项配置

@@ -19,6 +19,9 @@ class HabitCard extends StatelessWidget {
     this.checkIn,
     required this.onTap,
     required this.onLongPress,
+    this.batchMode = false,
+    this.isSelected = false,
+    this.onSelectToggle,
   });
 
   final Habit habit;
@@ -26,6 +29,16 @@ class HabitCard extends StatelessWidget {
   final CheckIn? checkIn;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+
+  // ===== 批量模式相关参数 =====
+  /// 是否处于批量模式（true 时显示复选框，点击切换选中而非打卡）
+  final bool batchMode;
+
+  /// 当前是否被选中（仅 batchMode=true 时有效）
+  final bool isSelected;
+
+  /// 复选框点击回调（仅 batchMode=true 时触发）
+  final VoidCallback? onSelectToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -55,29 +68,56 @@ class HabitCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOut,
+      // 性能优化：原 AnimatedContainer 在主题切换时会触发 350ms 动画，
+      // 所有卡片同时动画导致掉帧。改用普通 Container，
+      // 主题切换时瞬时更新颜色，避免多卡片并发动画。
+      // （打卡状态的视觉反馈已通过颜色变化体现，无需额外过渡动画）
+      child: Container(
         padding: const EdgeInsets.all(16),
         decoration: targetDecoration,
         child: Row(
           children: [
-            // 图标区域
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isCheckedIn
-                    ? habitColor.withValues(alpha: 0.3)
-                    : habitColor.withValues(alpha: 0.1),
-                borderRadius: const BorderRadius.all(Radius.circular(10)),
+            // 图标区域（批量模式下替换为复选框）
+            if (batchMode)
+              GestureDetector(
+                onTap: onSelectToggle,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.primary.withValues(alpha: 0.2)
+                        : AppColors.lightCard,
+                    borderRadius: const BorderRadius.all(Radius.circular(10)),
+                    border: Border.all(
+                      color: isSelected ? AppColors.primary : AppColors.divider,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(
+                    isSelected ? Icons.check : null,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
+                ),
+              )
+            else
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isCheckedIn
+                      ? habitColor.withValues(alpha: 0.3)
+                      : habitColor.withValues(alpha: 0.1),
+                  borderRadius: const BorderRadius.all(Radius.circular(10)),
+                ),
+                child: Icon(
+                  _getIconData(habit.icon),
+                  color: isCheckedIn ? habitColor : AppColors.textPrimary,
+                  size: 22,
+                ),
               ),
-              child: Icon(
-                _getIconData(habit.icon),
-                color: isCheckedIn ? habitColor : AppColors.textPrimary,
-                size: 22,
-              ),
-            ),
 
             const SizedBox(width: 16),
 
@@ -105,19 +145,21 @@ class HabitCard extends StatelessWidget {
               ),
             ),
 
-            // 状态标记
-            if (isCheckedIn)
-              Icon(
-                Icons.check_circle,
-                color: habitColor,
-                size: 24,
-              )
-            else
-              Icon(
-                Icons.radio_button_unchecked,
-                color: AppColors.textHint,
-                size: 24,
-              ),
+            // 状态标记（批量模式下隐藏，避免与复选框重复）
+            if (!batchMode) ...[
+              if (isCheckedIn)
+                Icon(
+                  Icons.check_circle,
+                  color: habitColor,
+                  size: 24,
+                )
+              else
+                Icon(
+                  Icons.radio_button_unchecked,
+                  color: AppColors.textHint,
+                  size: 24,
+                ),
+            ],
           ],
         ),
       ),

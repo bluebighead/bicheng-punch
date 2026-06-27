@@ -1,9 +1,21 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 严格模式：悬浮窗覆盖非白名单应用（MIUI 适配方案）
+         用户在非白名单应用界面时显示覆盖层，需下拉通知栏点击返回 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 严格模式：读取应用使用情况（监控前台应用是否为白名单内应用）。
+         此权限为 signature|privileged 级别，普通应用声明后需用户在系统设置中
+         手动授权「使用情况访问」才能生效。未声明则应用不会出现在授权列表中。 -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- 自定义铃声：读取外部存储音频文件（Android 12 及以下需要） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
         android:label="笔程"
@@ -49,6 +61,31 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/home_widget_info" />
         </receiver>
+
+        <!-- 严格模式监控 Service：前台常驻，监控并拉回非白名单应用 -->
+        <service
+            android:name=".StrictMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="专注严格模式监控，防止用户在专注期间切换到非白名单应用" />
+        </service>
+
+        <!-- 严格模式辅助服务：监听窗口切换事件，检测到非白名单应用自动返回 -->
+        <!-- BIND_ACCESSIBILITY_SERVICE 为 signature 级别权限，系统自动授予，
+             用户需在系统辅助功能设置中手动开启本服务 -->
+        <service
+            android:name=".StrictModeAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -59,6 +96,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 白名单功能：查询可启动应用（Android 11+ 包可见性要求） -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
         </intent>
     </queries>
 </manifest>

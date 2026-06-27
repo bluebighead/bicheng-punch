@@ -16,6 +16,12 @@ class CheckInProvider extends ChangeNotifier {
   List<CheckIn> _checkIns = [];
   bool _isLoading = false;
 
+  // ===== 计算结果缓存 =====
+  // 主题切换/UI 重建时高频访问 isCheckedIn，原实现每次 .any() 遍历全部记录。
+  // 缓存今日已打卡 habitId 集合，O(1) 查询。
+  Set<String>? _todayCheckedHabitIdsCache;
+  DateTime? _todayCacheDate;
+
   /// 数据变更回调：数据发生变化时触发（用于通知 LoginProvider 同步到服务器）
   VoidCallback? onDataChanged;
 
@@ -27,6 +33,43 @@ class CheckInProvider extends ChangeNotifier {
 
   /// 是否正在加载
   bool get isLoading => _isLoading;
+
+  /// 失效今日打卡缓存（数据变更时调用）
+  void _invalidateTodayCache() {
+    _todayCheckedHabitIdsCache = null;
+    _todayCacheDate = null;
+  }
+
+  /// 获取今日已打卡的习惯 ID 集合（缓存）
+  ///
+  /// 性能优化：原 isCheckedIn 逐个 habit 调用 .any() 遍历全部 checkIns，
+  /// N 个习惯 × M 条记录 = O(N*M)。
+  /// 改为一次性构建今日打卡 Set，后续查询 O(1)。
+  Set<String> getTodayCheckedHabitIds() {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    // 缓存有效则直接返回
+    if (_todayCheckedHabitIdsCache != null &&
+        _todayCacheDate != null &&
+        _todayCacheDate!.year == todayDate.year &&
+        _todayCacheDate!.month == todayDate.month &&
+        _todayCacheDate!.day == todayDate.day) {
+      return _todayCheckedHabitIdsCache!;
+    }
+
+    // 重新构建缓存
+    _todayCheckedHabitIdsCache = <String>{};
+    _todayCacheDate = todayDate;
+    for (final c in _checkIns) {
+      if (c.date.year == todayDate.year &&
+          c.date.month == todayDate.month &&
+          c.date.day == todayDate.day) {
+        _todayCheckedHabitIdsCache!.add(c.habitId);
+      }
+    }
+    return _todayCheckedHabitIdsCache!;
+  }
 
   /// 初始化：从 Hive 加载打卡记录
   Future<void> loadCheckIns() async {
@@ -43,6 +86,7 @@ class CheckInProvider extends ChangeNotifier {
     }
 
     _isLoading = false;
+    _invalidateTodayCache();
     notifyListeners();
   }
 
@@ -138,6 +182,7 @@ class CheckInProvider extends ChangeNotifier {
       final box = StorageService.checkInBox;
       await box.put(checkIn.id, checkIn);
       _checkIns.add(checkIn);
+      _invalidateTodayCache();
       notifyListeners();
       debugPrint('打卡成功: ${checkIn.id}');
 
@@ -160,6 +205,7 @@ class CheckInProvider extends ChangeNotifier {
       final box = StorageService.checkInBox;
       await box.delete(checkInId);
       _checkIns.removeWhere((c) => c.id == checkInId);
+      _invalidateTodayCache();
       notifyListeners();
       onDataChanged?.call();
       debugPrint('取消打卡: $checkInId');
@@ -260,6 +306,7 @@ class CheckInProvider extends ChangeNotifier {
     }
 
     if (importedCount > 0) {
+      _invalidateTodayCache();
       notifyListeners();
       debugPrint('从云端导入 $importedCount 条打卡记录');
     }

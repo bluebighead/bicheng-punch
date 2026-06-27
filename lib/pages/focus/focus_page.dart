@@ -16,51 +16,61 @@ class FocusPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // 性能优化：原 Consumer<FocusProvider> 在专注会话期间会因 Timer
+    // 每秒 notifyListeners 而重建整页（此处仅展示今日次数/时长，无需每秒刷新）。
+    // 改用 context.select 精细订阅，仅当所选字段变化时才重建。
+    // todayFocusCount / todayFocusDurationText 仅在新专注记录保存后变化，
+    // 计时 tick 不会触发本页重建。
+    final todayFocusCount =
+        context.select<FocusProvider, int>((p) => p.todayFocusCount);
+    final todayFocusDurationText =
+        context.select<FocusProvider, String>((p) => p.todayFocusDurationText);
+
     return Scaffold(
       appBar: AppBar(
         leading: const SizedBox.shrink(),
         title: const Text('专注'),
       ),
-      body: Consumer<FocusProvider>(
-        builder: (context, provider, child) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppTheme.pagePaddingH),
-              child: Column(
-                children: [
-                  const SizedBox(height: 32),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppTheme.pagePaddingH),
+          child: Column(
+            children: [
+              const SizedBox(height: 32),
 
-                  // ===== 今日统计 =====
-                  _buildTodayStats(provider, theme),
+              // ===== 今日统计 =====
+              _buildTodayStats(todayFocusCount, todayFocusDurationText, theme),
 
-                  const SizedBox(height: 48),
+              const SizedBox(height: 48),
 
-                  // ===== 快速开始按钮 =====
-                  _buildQuickStartButton(context, provider),
+              // ===== 快速开始按钮 =====
+              _buildQuickStartButton(context),
 
-                  const Spacer(),
+              const Spacer(),
 
-                  // ===== 鼓励文案 =====
-                  Text(
-                    '专注即前进，一次就好',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-                ],
+              // ===== 鼓励文案 =====
+              Text(
+                '专注即前进，一次就好',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: AppColors.textSecondary,
+                ),
               ),
-            ),
-          );
-        },
+
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   /// 构建今日统计
-  Widget _buildTodayStats(FocusProvider provider, ThemeData theme) {
+  ///
+  /// 性能优化：通过参数显式接收 [todayFocusCount] / [todayFocusDurationText]，
+  /// 避免在此方法内访问 provider 触发订阅。
+  Widget _buildTodayStats(
+      int todayFocusCount, String todayFocusDurationText, ThemeData theme) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -73,7 +83,7 @@ class FocusPage extends StatelessWidget {
           // 专注次数
           _StatItem(
             label: '今日专注',
-            value: '${provider.todayFocusCount}',
+            value: '$todayFocusCount',
             unit: '次',
           ),
 
@@ -87,8 +97,8 @@ class FocusPage extends StatelessWidget {
           // 专注时长
           _StatItem(
             label: '累计时长',
-            value: '${provider.todayFocusMinutes}',
-            unit: '分钟',
+            value: todayFocusDurationText,
+            unit: '',
           ),
         ],
       ),
@@ -96,7 +106,10 @@ class FocusPage extends StatelessWidget {
   }
 
   /// 构建快速开始按钮
-  Widget _buildQuickStartButton(BuildContext context, FocusProvider provider) {
+  ///
+  /// 性能优化：mode/targetMinutes 通过 context.read 一次性读取，
+  /// 避免订阅 FocusProvider 导致专注期间每秒重建。
+  Widget _buildQuickStartButton(BuildContext context) {
     return Column(
       children: [
         // 计时圆环占位
@@ -157,6 +170,8 @@ class FocusPage extends StatelessWidget {
             _QuickStartChip(
               label: '25 分钟',
               onTap: () {
+                // 使用 context.read 避免订阅，此处仅需一次性操作
+                final provider = context.read<FocusProvider>();
                 provider.setMode(FocusMode.countdown);
                 provider.setTargetMinutes(25);
                 Navigator.pushNamed(context, '/focus/timer');
@@ -166,6 +181,7 @@ class FocusPage extends StatelessWidget {
             _QuickStartChip(
               label: '自由计时',
               onTap: () {
+                final provider = context.read<FocusProvider>();
                 provider.setMode(FocusMode.stopwatch);
                 Navigator.pushNamed(context, '/focus/timer');
               },

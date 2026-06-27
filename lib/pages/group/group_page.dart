@@ -85,6 +85,11 @@ class _GroupPageState extends State<GroupPage> {
   }
 
   /// 一键添加所有模板习惯
+  ///
+  /// 添加完成后：保留在模板页并重置到分类选择界面（不跳转、不 pop）。
+  /// 原实现调用 Navigator.pop(context) 会在「模板」tab 内误 pop 掉 MainShell
+  /// 根路由，导致出现一个没有底部导航栏的独立 HomePage。这里去掉跳转，
+  /// 让用户通过底部导航自行切换查看新添加的习惯。
   Future<void> _addAllTemplates() async {
     if (_selectedCategory == null || _templates == null || _templates!.isEmpty) {
       return;
@@ -99,12 +104,15 @@ class _GroupPageState extends State<GroupPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('已添加 ${_templates!.length} 个习惯，开始备考之旅吧！'),
+            content: Text('已添加 ${_templates!.length} 个习惯，切到「今日」即可查看'),
             behavior: SnackBarBehavior.floating,
           ),
         );
-        // 添加完成后返回主页
-        Navigator.pop(context);
+        // 重置到分类选择页，保留在模板页内，不跳转
+        setState(() {
+          _selectedCategory = null;
+          _templates = null;
+        });
       }
     } catch (e) {
       if (mounted) {

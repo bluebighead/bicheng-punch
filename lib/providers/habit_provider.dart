@@ -15,14 +15,29 @@ class HabitProvider extends ChangeNotifier {
   List<Habit> _habits = [];
   bool _isLoading = false;
 
+  // ===== 计算结果缓存 =====
+  // 主题切换/UI 重建时高频访问 activeHabits 和 getTodayHabits()，
+  // 原实现每次都 filter+toList 创建新列表，数据多时累积开销明显。
+  // 缓存后仅在数据变更（增删改/加载）时失效重算。
+  List<Habit>? _activeHabitsCache;
+  List<Habit>? _todayHabitsCache;
+
   /// 数据变更回调：数据发生变化时触发（用于通知 LoginProvider 同步到服务器）
   VoidCallback? onDataChanged;
+
+  /// 失效计算缓存（数据变更时调用）
+  void _invalidateCache() {
+    _activeHabitsCache = null;
+    _todayHabitsCache = null;
+  }
 
   /// 获取所有习惯列表
   List<Habit> get habits => _habits;
 
-  /// 获取启用的习惯列表
-  List<Habit> get activeHabits => _habits.where((h) => h.isActive).toList();
+  /// 获取启用的习惯列表（缓存：避免每次 build 重复 filter）
+  List<Habit> get activeHabits =>
+      _activeHabitsCache ??=
+          _habits.where((h) => h.isActive).toList();
 
   /// 是否正在加载
   bool get isLoading => _isLoading;
@@ -42,20 +57,23 @@ class HabitProvider extends ChangeNotifier {
     }
 
     _isLoading = false;
+    _invalidateCache();
     notifyListeners();
 
     // 更新桌面小组件数据
     WidgetService.updateWidgetData(_habits);
   }
 
-  /// 获取今日需打卡的习惯列表
+  /// 获取今日需打卡的习惯列表（缓存：避免每次 build 重复 filter）
   ///
   /// 过滤规则：
   /// 1. 习惯需启用（isActive）
   /// 2. 根据打卡频率规则判断今日是否需要打卡
   List<Habit> getTodayHabits() {
+    if (_todayHabitsCache != null) return _todayHabitsCache!;
     final today = DateTime.now();
-    return activeHabits.where((h) => h.shouldCheckInOn(today)).toList();
+    _todayHabitsCache = activeHabits.where((h) => h.shouldCheckInOn(today)).toList();
+    return _todayHabitsCache!;
   }
 
   /// 添加单个习惯
@@ -64,6 +82,7 @@ class HabitProvider extends ChangeNotifier {
       final box = StorageService.habitBox;
       await box.put(habit.id, habit);
       _habits.add(habit);
+      _invalidateCache();
       notifyListeners();
       debugPrint('添加习惯: ${habit.name}');
 
@@ -92,6 +111,7 @@ class HabitProvider extends ChangeNotifier {
       final box = StorageService.habitBox;
       await box.delete(habitId);
       _habits.removeWhere((h) => h.id == habitId);
+      _invalidateCache();
       notifyListeners();
       debugPrint('删除习惯: $habitId');
 
@@ -117,6 +137,7 @@ class HabitProvider extends ChangeNotifier {
         icon: oldHabit.icon,
         color: oldHabit.color,
         examCategory: oldHabit.examCategory,
+        customCategory: oldHabit.customCategory,
         frequencyType: oldHabit.frequencyType,
         weeklyCount: oldHabit.weeklyCount,
         customDays: oldHabit.customDays,
@@ -127,6 +148,7 @@ class HabitProvider extends ChangeNotifier {
       final box = StorageService.habitBox;
       await box.put(habitId, newHabit);
       _habits[index] = newHabit;
+      _invalidateCache();
       notifyListeners();
 
       // 更新桌面小组件数据
@@ -145,6 +167,59 @@ class HabitProvider extends ChangeNotifier {
     return null;
   }
 
+  /// 批量设置自定义分类组
+  ///
+  /// 将 [habitIds] 中所有自定义习惯（examCategory == custom）的 customCategory
+  /// 设置为 [categoryName]。传入 null 或空字符串则将其重置回默认「自定义」组。
+  ///
+  /// 注意：仅自定义习惯会被修改，模板习惯（考研/考公等）不受影响。
+  Future<void> setCustomCategoryForHabits(
+    List<String> habitIds,
+    String? categoryName,
+  ) async {
+    final trimmed = categoryName?.trim();
+    final target = (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    final box = StorageService.habitBox;
+    int updatedCount = 0;
+
+    for (final id in habitIds) {
+      final index = _habits.indexWhere((h) => h.id == id);
+      if (index == -1) continue;
+
+      final oldHabit = _habits[index];
+      // 仅自定义习惯可被重新分组
+      if (oldHabit.examCategory != ExamCategory.custom) continue;
+      // 若值未变化则跳过
+      if (oldHabit.customCategory == target) continue;
+
+      final newHabit = Habit(
+        id: oldHabit.id,
+        name: oldHabit.name,
+        icon: oldHabit.icon,
+        color: oldHabit.color,
+        examCategory: oldHabit.examCategory,
+        customCategory: target,
+        frequencyType: oldHabit.frequencyType,
+        weeklyCount: oldHabit.weeklyCount,
+        customDays: oldHabit.customDays,
+        createdAt: oldHabit.createdAt,
+        isActive: oldHabit.isActive,
+      );
+
+      await box.put(id, newHabit);
+      _habits[index] = newHabit;
+      updatedCount++;
+    }
+
+    if (updatedCount > 0) {
+      _invalidateCache();
+      notifyListeners();
+      WidgetService.updateWidgetData(_habits);
+      onDataChanged?.call();
+      debugPrint('已为 $updatedCount 个习惯设置分类组: $target');
+    }
+  }
+
   // ===== 云同步：导出/导入 =====
 
   /// 将习惯列表导出为 JSON（用于上传到服务器）
@@ -155,6 +230,7 @@ class HabitProvider extends ChangeNotifier {
       'icon': h.icon,
       'color': h.color,
       'examCategory': h.examCategory.name,
+      'customCategory': h.customCategory,
       'frequencyType': h.frequencyType.name,
       'weeklyCount': h.weeklyCount,
       'customDays': h.customDays,
@@ -185,6 +261,7 @@ class HabitProvider extends ChangeNotifier {
             (e) => e.name == item['examCategory'],
             orElse: () => ExamCategory.custom,
           ),
+          customCategory: item['customCategory'] as String?,
           frequencyType: FrequencyType.values.firstWhere(
             (f) => f.name == item['frequencyType'],
             orElse: () => FrequencyType.daily,
@@ -204,6 +281,7 @@ class HabitProvider extends ChangeNotifier {
     }
 
     if (importedCount > 0) {
+      _invalidateCache();
       notifyListeners();
       WidgetService.updateWidgetData(_habits);
       onDataChanged?.call();

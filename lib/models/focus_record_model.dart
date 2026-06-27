@@ -87,6 +87,17 @@ class FocusRecord {
   }
 }
 
+/// 专注结束铃声类型枚举
+///
+/// 不持久化到数据库，仅内存态存储。
+/// 音频文件需放置到 assets/audio/ 目录下。
+enum RingtoneType {
+  classic,   // 经典提示音 -> complete.mp3
+  gentle,    // 轻柔铃声 -> gentle.mp3
+  digital,   // 数字闹铃 -> digital.mp3
+  nature,    // 自然风铃 -> nature.mp3
+}
+
 /// FocusRecord Hive TypeAdapter
 class FocusRecordAdapter extends TypeAdapter<FocusRecord> {
   @override

@@ -17,7 +17,7 @@
 | 模块 | 页面 | 功能描述 |
 |------|------|----------|
 | 📋 **首页** | `/home` | 今日打卡概览，卡片式布局一键打卡 |
-| ⏱ **专注** | `/focus` | 番茄钟 / 倒计时专注模式，白噪音背景音 |
+| ⏱ **专注** | `/focus` | 番茄钟 / 倒计时专注模式，白噪音背景音，严格模式防切换 |
 | 📊 **统计** | `/stats` | 周期完成率、累计时长、习惯热力图等图表 |
 | 📁 **模板** | `/group` | 备考计划模板，快速创建习惯 |
 | 👤 **我的** | `/profile` | 个人设置、补签管理、云端同步 |
@@ -38,6 +38,16 @@
 | **home_widget** | 桌面小组件，一键快捷打卡 |
 | **http** | 与本地后端通信，数据同步 |
 | **Material 3** | Material You 设计语言 |
+
+### Android 原生（严格模式）
+
+| 技术 | 用途 |
+|------|------|
+| **AccessibilityService** | 监听窗口切换事件，检测非白名单应用并执行返回动作 |
+| **Foreground Service** | 严格模式运行时持续监控前台应用 |
+| **WindowManager (TYPE_APPLICATION_OVERLAY)** | 覆盖非白名单应用界面，提供返回专注按钮 |
+| **UsageStatsManager** | 轮询检测前台应用包名（兼容 MIUI 后台限制） |
+| **MethodChannel** | Flutter 与原生通信（启用/禁用严格模式、查询白名单应用） |
 
 ### 后端（Python）
 
@@ -100,6 +110,10 @@
 │   ├── server.db                 # SQLite 数据库
 │   └── users.json                # 用户数据（备用）
 ├── android/                      # Android 原生配置
+│   └── app/src/main/kotlin/com/kaobei/kaobei_punch/
+│       ├── MainActivity.kt                       # 主 Activity，MethodChannel 通信
+│       ├── StrictMonitorService.kt               # 严格模式前台服务（悬浮窗 + 通知）
+│       └── StrictModeAccessibilityService.kt     # 辅助服务（监听窗口切换）
 ├── ios/                          # iOS 原生配置
 ├── start_server.bat              # Windows 一键启动后端
 ├── pubspec.yaml                  # Flutter 依赖配置
@@ -144,6 +158,12 @@ flutter run
 - 专注页保持 **屏幕常亮**，避免学习中息屏打断
 - **白噪音** 帮助进入心流状态
 - 极简界面，无推送干扰
+- **严格模式**（Android）：
+  - 开启后锁定专注界面，禁止切换到非白名单应用
+  - 支持自定义白名单（如计算器、词典等学习工具）
+  - 使用辅助服务 + 悬浮窗 + 前台通知三重拉回机制
+  - 适配 MIUI 等定制系统的后台启动限制
+  - 计时结束或手动退出时自动关闭严格模式
 
 ### 本地优先 + 可选云同步
 - 所有数据优先存储在本地（Hive）

@@ -24,6 +24,7 @@ enum FrequencyType {
 /// - icon：图标标识（Material Icons name）
 /// - color：习惯颜色（存储为 int）
 /// - examCategory：备考分类
+/// - customCategory：自定义分类组名称（仅 examCategory == custom 时有效，null 表示归入「自定义」组）
 /// - frequencyType：打卡频率类型
 /// - weeklyCount：每周打卡次数（仅 weeklyX 类型有效）
 /// - customDays：自定义打卡日期（仅 customDays 类型，存储 weekday 列表 1-7）
@@ -36,6 +37,7 @@ class Habit {
     required this.icon,
     required this.color,
     required this.examCategory,
+    this.customCategory,
     required this.frequencyType,
     this.weeklyCount = 7,
     this.customDays = const [1, 2, 3, 4, 5, 6, 7],
@@ -48,6 +50,12 @@ class Habit {
   final String icon; // Material Icon 名称，如 'book', 'calculate', 'fitness_center'
   final int color; // 颜色值，如 0xFF6B8E9F
   final ExamCategory examCategory;
+  /// 自定义分类组名称
+  ///
+  /// 仅当 [examCategory] == [ExamCategory.custom] 时有效：
+  /// - null：归入默认「自定义」组
+  /// - 非空字符串：归入以该字符串命名的自定义分类组（由用户在批量操作中创建）
+  final String? customCategory;
   final FrequencyType frequencyType;
   final int weeklyCount; // 每周打卡次数，默认 7（每日）
   final List<int> customDays; // 自定义打卡日期（1=周一，7=周日）
@@ -96,6 +104,8 @@ class HabitAdapter extends TypeAdapter<Habit> {
         customDays: (fields[7] as List?)?.cast<int>() ?? const [1, 2, 3, 4, 5, 6, 7],
         createdAt: fields[8] as DateTime,
         isActive: fields[9] as bool? ?? true,
+        // 字段 10：customCategory（向后兼容，旧数据无此字段时为 null）
+        customCategory: fields[10] as String?,
       );
     } catch (e) {
       // 容错：读取失败时返回默认习惯，避免数据损坏导致崩溃
@@ -114,7 +124,7 @@ class HabitAdapter extends TypeAdapter<Habit> {
   @override
   void write(BinaryWriter writer, Habit obj) {
     writer
-      ..writeByte(10) // 字段数量
+      ..writeByte(11) // 字段数量
       ..writeByte(0)..write(obj.id)
       ..writeByte(1)..write(obj.name)
       ..writeByte(2)..write(obj.icon)
@@ -124,7 +134,8 @@ class HabitAdapter extends TypeAdapter<Habit> {
       ..writeByte(6)..write(obj.weeklyCount)
       ..writeByte(7)..write(obj.customDays)
       ..writeByte(8)..write(obj.createdAt)
-      ..writeByte(9)..write(obj.isActive);
+      ..writeByte(9)..write(obj.isActive)
+      ..writeByte(10)..write(obj.customCategory);
   }
 
   @override
@@ -136,4 +147,43 @@ class HabitAdapter extends TypeAdapter<Habit> {
       other is HabitAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
+}
+
+/// 备考分类显示名称映射
+///
+/// 将 [ExamCategory] 枚举映射为用户可见的中文名称。
+/// 仅用于 UI 展示，不参与持久化。
+const Map<ExamCategory, String> examCategoryNames = {
+  ExamCategory.kaoyan: '考研',
+  ExamCategory.kaogong: '考公',
+  ExamCategory.jiaozhi: '教资',
+  ExamCategory.cet4cet6: '四六级',
+  ExamCategory.custom: '自定义',
+};
+
+/// 默认自定义分类组的显示名称
+const String kDefaultCustomGroupName = '自定义';
+
+/// 获取习惯的「显示分类名称」
+///
+/// 分类判定规则：
+/// - 若 [Habit.examCategory] != [ExamCategory.custom]：返回对应备考分类名（考研/考公/教资/四六级）
+/// - 若 [Habit.examCategory] == [ExamCategory.custom] 且 [Habit.customCategory] 非空：返回 [Habit.customCategory]
+/// - 若 [Habit.examCategory] == [ExamCategory.custom] 且 [Habit.customCategory] 为空：返回 [kDefaultCustomGroupName]（「自定义」）
+String habitDisplayCategory(Habit habit) {
+  if (habit.examCategory != ExamCategory.custom) {
+    return examCategoryNames[habit.examCategory] ?? kDefaultCustomGroupName;
+  }
+  // 自定义习惯：优先使用 customCategory，否则归入默认「自定义」组
+  final custom = habit.customCategory?.trim();
+  return (custom == null || custom.isEmpty) ? kDefaultCustomGroupName : custom;
+}
+
+/// 判断习惯是否属于默认「自定义」组
+///
+/// 即：自定义习惯且未设置 customCategory。
+bool isHabitInDefaultCustomGroup(Habit habit) {
+  if (habit.examCategory != ExamCategory.custom) return false;
+  final custom = habit.customCategory?.trim();
+  return custom == null || custom.isEmpty;
 }

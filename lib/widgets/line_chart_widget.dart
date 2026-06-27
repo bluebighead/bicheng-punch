@@ -60,15 +60,21 @@ class LineChartWidget extends StatelessWidget {
               height: 200,
               child: data.isEmpty
                   ? _buildEmptyState()
-                  : CustomPaint(
-                      painter: _SimpleLineChartPainter(
-                        data: data,
-                        isWeekView: isWeekView,
-                        lineColor: AppColors.primary,
-                        dotColor: AppColors.primary,
-                        gridColor: AppColors.divider,
+                  : RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _SimpleLineChartPainter(
+                          data: data,
+                          isWeekView: isWeekView,
+                          lineColor: AppColors.primary,
+                          dotColor: AppColors.primary,
+                          gridColor: AppColors.divider,
+                          // 性能优化+主题适配：数据点内圈使用卡片色，
+                          // 深色模式下不再硬白刺眼；shouldRepaint 加入对比，主题切换才重绘
+                          innerDotColor: theme.cardColor,
+                          axisLabelColor: AppColors.textSecondary,
+                        ),
+                        size: const Size(double.infinity, 200),
                       ),
-                      size: const Size(double.infinity, 200),
                     ),
             ),
           ),
@@ -112,6 +118,12 @@ class _SimpleLineChartPainter extends CustomPainter {
   final Color dotColor;
   final Color gridColor;
 
+  /// 数据点内圈颜色（原硬编码 Colors.white，深色模式不适配）
+  final Color innerDotColor;
+
+  /// X/Y 轴标签文字颜色
+  final Color axisLabelColor;
+
   // 图表内边距
   static const double _left = 36;
   static const double _right = 8;
@@ -124,6 +136,8 @@ class _SimpleLineChartPainter extends CustomPainter {
     required this.lineColor,
     required this.dotColor,
     required this.gridColor,
+    required this.innerDotColor,
+    required this.axisLabelColor,
   });
 
   @override
@@ -217,17 +231,17 @@ class _SimpleLineChartPainter extends CustomPainter {
         4.5,
         Paint()..color = dotColor..style = PaintingStyle.fill,
       );
-      // 内圈：白色
+      // 内圈：使用传入的主题卡片色（适配深色模式）
       canvas.drawCircle(
         Offset(x, y),
         2.0,
-        Paint()..color = Colors.white..style = PaintingStyle.fill,
+        Paint()..color = innerDotColor..style = PaintingStyle.fill,
       );
     }
 
     // ---- 6. 绘制 X 轴标签 ----
     final xTextStyle = TextStyle(
-      color: AppColors.textSecondary,
+      color: axisLabelColor,
       fontSize: 10,
     );
     final step = n > 14 ? (n / 7).ceil() : 1;
@@ -253,7 +267,7 @@ class _SimpleLineChartPainter extends CustomPainter {
 
     // ---- 7. 绘制 Y 轴标签 ----
     final yTextStyle = TextStyle(
-      color: AppColors.textSecondary,
+      color: axisLabelColor,
       fontSize: 9,
     );
 
@@ -271,7 +285,7 @@ class _SimpleLineChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SimpleLineChartPainter oldDelegate) {
-    // 数据长度不同则重绘
+    // 性能优化：数据长度不同则重绘
     if (data.length != oldDelegate.data.length) return true;
     // 逐条比较数据
     final e1 = data.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
@@ -279,6 +293,11 @@ class _SimpleLineChartPainter extends CustomPainter {
     for (int i = 0; i < e1.length; i++) {
       if (e1[i].key != e2[i].key || e1[i].value != e2[i].value) return true;
     }
-    return false;
+    // 主题相关颜色变化时也重绘（深浅模式切换）
+    return lineColor != oldDelegate.lineColor ||
+        dotColor != oldDelegate.dotColor ||
+        gridColor != oldDelegate.gridColor ||
+        innerDotColor != oldDelegate.innerDotColor ||
+        axisLabelColor != oldDelegate.axisLabelColor;
   }
 }

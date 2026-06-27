@@ -116,6 +116,16 @@ class KaobeiPunchApp extends StatelessWidget {
             theme: AppTheme.light,
             darkTheme: AppTheme.dark,
             themeMode: themeProvider.themeMode,
+            // 性能优化（关键）：禁用 MaterialApp 默认的 200ms 主题过渡动画。
+            //
+            // 原本主题切换时，MaterialApp 内部的 AnimatedTheme 会在 200ms 内
+            // 逐帧插值 ThemeData，每帧都触发整树 rebuild（所有 Theme.of(context)
+            // 依赖的 widget 都会重建）。子树庞大时（5 个一级页 + 列表 + 图表），
+            // 这 200ms 内每帧 build 都很重，导致明显掉帧。
+            //
+            // 设为 Duration.zero 后主题瞬时切换，仅发生一次 rebuild，
+            // 彻底消除过渡期间的多帧卡顿。
+            themeAnimationDuration: Duration.zero,
             // 命名路由：初始进入主框架 Shell
             initialRoute: AppRouter.initialRoute,
             onGenerateRoute: AppRouter.onGenerateRoute,

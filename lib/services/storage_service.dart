@@ -130,4 +130,38 @@ class StorageService {
       debugPrint('设置休息日失败: $e');
     }
   }
+
+  // ===== 白名单应用相关 =====
+
+  /// 读取白名单应用列表
+  ///
+  /// 返回持久化的白名单应用列表，未设置时返回空列表。
+  /// 上限由 UI 层约束（3 个），存储层不强制。
+  static List<Map<String, dynamic>> getWhitelistApps() {
+    try {
+      final raw = _configBox.get('whitelist_apps');
+      if (raw == null) return [];
+      if (raw is List) {
+        return raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('读取白名单应用失败: $e');
+      return [];
+    }
+  }
+
+  /// 写入白名单应用列表
+  ///
+  /// [apps] 为待持久化的白名单应用 JSON 列表
+  static void setWhitelistApps(List<Map<String, dynamic>> apps) {
+    try {
+      _configBox.put('whitelist_apps', apps);
+    } catch (e) {
+      debugPrint('写入白名单应用失败: $e');
+    }
+  }
 }

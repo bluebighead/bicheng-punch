@@ -20,11 +20,16 @@ class AppTheme {
   /// 页面统一水平内边距，保证留白
   static const double pagePaddingH = 20.0;
 
-  /// 浅色主题
-  static ThemeData get light => _buildTheme(Brightness.light);
+  /// 浅色主题（缓存：避免每次主题切换都重建 ThemeData）
+  ///
+  /// 原为 getter，每次访问都调用 _buildTheme 重新构建完整 ThemeData
+  /// （含 ColorScheme、13 个 TextStyle、各种组件主题）。
+  /// 主题切换时 MaterialApp 重建会再次访问，导致重复构建卡顿。
+  /// 改为 static final，类加载时构建一次永久复用。
+  static final ThemeData light = _buildTheme(Brightness.light);
 
-  /// 深色主题
-  static ThemeData get dark => _buildTheme(Brightness.dark);
+  /// 深色主题（缓存，同上）
+  static final ThemeData dark = _buildTheme(Brightness.dark);
 
   static ThemeData _buildTheme(Brightness brightness) {
     final isLight = brightness == Brightness.light;

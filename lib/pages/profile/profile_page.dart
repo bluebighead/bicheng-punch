@@ -13,7 +13,7 @@ import '../../routes/app_routes.dart';
 ///
 /// 功能项：
 /// 1. 本月补签入口：展示剩余补签次数，点击可查看历史补签
-/// 2. 深色模式切换：底部弹窗选择跟随系统/浅色/深色
+/// 2. 主题切换：底部弹窗选择跟随系统/浅色/深色
 /// 3. 提醒设置：提醒时间与开关（占位，后续接入通知服务）
 /// 4. 休息日设置：选择每周休息日（周六/周日/两者）
 /// 5. 关于：版本信息展示
@@ -77,7 +77,10 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  /// 显示深色模式选择弹窗
+  /// 显示主题切换选择弹窗
+  ///
+  /// 弹窗标题用"主题切换"，与弹窗内的"深色模式"选项区分开，
+  /// 避免设置项名称和其中一个选项名相同造成混淆。
   void _showThemeModeDialog(BuildContext context) {
     final themeProvider = context.read<ThemeProvider>();
     final currentMode = themeProvider.themeMode;
@@ -105,7 +108,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '深色模式',
+                  '主题切换',
                   style: Theme.of(ctx).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 16),
@@ -322,7 +325,7 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 16),
               _buildGuideSection('⚙️ 我的设置', [
                 '每月可补签遗漏的打卡',
-                '支持深色模式切换（跟随系统/浅色/深色）',
+                '支持主题切换（跟随系统/浅色/深色）',
                 '可设置休息日（不计入完成率）',
                 '专注记录会自动统计到数据页',
               ]),
@@ -444,11 +447,13 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
 
-                // 深色模式
+                // 主题切换（设置项名称与弹窗内"深色模式"选项区分，避免混淆）
+                // 性能优化：trailing 用独立 widget 订阅 ThemeProvider，
+                // 仅主题标签自身重建，避免整个 ProfilePage 重建
                 _SettingTile(
                   icon: Icons.dark_mode_outlined,
-                  title: '深色模式',
-                  trailing: _getThemeModeLabel(context),
+                  title: '主题切换',
+                  trailing: _ThemeModeLabel(),
                   onTap: () => _showThemeModeDialog(context),
                 ),
 
@@ -456,7 +461,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _SettingTile(
                   icon: Icons.notifications_none_outlined,
                   title: '提醒',
-                  trailing: '未开启',
+                  trailing: const Text('未开启'),
                   onTap: () => _showReminderSettings(context),
                 ),
 
@@ -464,7 +469,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _SettingTile(
                   icon: Icons.calendar_month_outlined,
                   title: '休息日设置',
-                  trailing: _getRestDayLabel(),
+                  trailing: Text(_getRestDayLabel()),
                   onTap: () => _showRestDayDialog(context),
                 ),
 
@@ -487,7 +492,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     return _SettingTile(
                       icon: Icons.science_outlined,
                       title: '测试数据',
-                      trailing: statsProvider.hasTestData ? '已开启' : '已关闭',
+                      trailing: Text(statsProvider.hasTestData ? '已开启' : '已关闭'),
                       onTap: () async {
                         final newState = !statsProvider.hasTestData;
                         await statsProvider.setTestDataEnabled(newState);
@@ -521,7 +526,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _SettingTile(
                   icon: Icons.menu_book_outlined,
                   title: '使用说明',
-                  trailing: '',
+                  trailing: const SizedBox.shrink(),
                   onTap: () => _showUsageGuideDialog(context),
                 ),
 
@@ -529,7 +534,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _SettingTile(
                   icon: Icons.info_outline,
                   title: '关于',
-                  trailing: 'v1.0.0',
+                  trailing: const Text('v1.0.0'),
                   onTap: () => _showAboutDialog(context),
                 ),
 
@@ -547,13 +552,16 @@ class _ProfilePageState extends State<ProfilePage> {
   /// 已登录：显示用户头像、昵称、补签额度、登出按钮
   /// 未登录：显示登录入口卡片，点击跳转登录页
   Widget _buildLoginCard(ThemeData theme) {
-    final loginProvider = context.watch<LoginProvider>();
+    // 性能优化：仅订阅 isLoggedIn 字段，避免 LoginProvider 其他字段变化触发重建
+    final isLoggedIn =
+        context.select<LoginProvider, bool>((p) => p.isLoggedIn);
     final checkInProvider = context.watch<CheckInProvider>();
 
-    if (loginProvider.isLoggedIn) {
+    if (isLoggedIn) {
       // 已登录状态：显示用户信息卡片
       // 补签剩余额度从 CheckInProvider 实时获取（配合 StorageService）
       final remainingQuota = checkInProvider.getRemainingMakeupQuota();
+      final loginProvider = context.read<LoginProvider>();
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
@@ -717,17 +725,23 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  /// 获取当前主题模式文字标签
-  String _getThemeModeLabel(BuildContext context) {
-    final themeProvider = context.watch<ThemeProvider>();
-    switch (themeProvider.themeMode) {
-      case ThemeMode.light:
-        return '浅色模式';
-      case ThemeMode.dark:
-        return '深色模式';
-      case ThemeMode.system:
-        return '跟随系统';
-    }
+}
+
+/// 主题模式文字标签
+///
+/// 性能优化：独立 widget + [context.select]，仅订阅 themeMode 字段。
+/// 主题切换时只重建此标签，不波及 ProfilePage 整页。
+class _ThemeModeLabel extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final themeMode =
+        context.select<ThemeProvider, ThemeMode>((p) => p.themeMode);
+    final label = switch (themeMode) {
+      ThemeMode.light => '浅色模式',
+      ThemeMode.dark => '深色模式',
+      ThemeMode.system => '跟随系统',
+    };
+    return Text(label);
   }
 }
 
@@ -742,7 +756,9 @@ class _SettingTile extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String trailing;
+  /// 性能优化：trailing 改为 Widget 类型，支持独立订阅的子 widget
+  /// （如主题标签 _ThemeModeLabel 仅自身重建，不波及 ProfilePage 整页）
+  final Widget trailing;
   final VoidCallback? onTap;
 
   @override
@@ -762,7 +778,11 @@ class _SettingTile extends StatelessWidget {
             Icon(icon, size: 22, color: AppColors.primary),
             const SizedBox(width: 14),
             Expanded(child: Text(title, style: theme.textTheme.bodyLarge)),
-            Text(trailing, style: theme.textTheme.bodySmall),
+            // trailing 样式由传入 widget 自行控制
+            DefaultTextStyle(
+              style: theme.textTheme.bodySmall ?? const TextStyle(),
+              child: trailing,
+            ),
             const SizedBox(width: 6),
             const Icon(Icons.chevron_right, color: AppColors.textHint, size: 20),
           ],

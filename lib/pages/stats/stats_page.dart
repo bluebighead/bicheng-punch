@@ -41,16 +41,22 @@ class _StatsPageState extends State<StatsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final focusProvider = context.watch<FocusProvider>();
+
+    // 只监听 timerState 的变化，避免每秒计时器 tick 触发整页重建
+    // （原来 context.watch<FocusProvider>() 会因 remainingSeconds 等字段变化而每秒重建）
+    final timerState =
+        context.select<FocusProvider, TimerState>((p) => p.timerState);
 
     // 检测专注会话结束（从非 idle 状态回到 idle 状态），刷新统计数据
-    if (_lastTimerState != TimerState.idle && focusProvider.timerState == TimerState.idle) {
+    if (_lastTimerState != TimerState.idle && timerState == TimerState.idle) {
       // 使用 postFrameCallback 避免在 build 中触发 setState
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // mounted 检查：防止 widget 在回调触发前已被卸载（如页面切换）时抛异常
+        if (!mounted) return;
         context.read<StatsProvider>().refresh();
       });
     }
-    _lastTimerState = focusProvider.timerState;
+    _lastTimerState = timerState;
 
     return Scaffold(
       appBar: AppBar(
@@ -152,7 +158,7 @@ class _StatsPageState extends State<StatsPage> {
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        statsProvider.formatDuration(statsProvider.weeklyStudyMinutes),
+                        statsProvider.formatDurationFromSeconds(statsProvider.weeklyStudySeconds),
                         style: theme.textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: AppColors.primary,
@@ -291,7 +297,7 @@ class _StatsPageState extends State<StatsPage> {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
-                    statsProvider.formatDuration(statsProvider.totalStudyMinutes),
+                    statsProvider.formatDurationFromSeconds(statsProvider.totalStudySeconds),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -335,6 +341,9 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   /// 构建趋势图表（周/月切换）
+  ///
+  /// 月视图时在标题下方提供月份切换 UI，避免 [StatsProvider.previousMonth] /
+  /// [nextMonth] / [setSelectedMonth] 成为死代码。
   Widget _buildTrendChart(ThemeData theme, StatsProvider statsProvider) {
     final isWeekView = statsProvider.viewType == ViewType.week;
     final title = isWeekView ? '本周学习时长趋势' : '本月学习时长趋势';
@@ -342,10 +351,65 @@ class _StatsPageState extends State<StatsPage> {
         ? statsProvider.weeklyDailyMinutes
         : statsProvider.monthlyDailyMinutes;
 
-    return LineChartWidget(
-      data: data,
-      title: title,
-      isWeekView: isWeekView,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 月视图：月份导航条
+        if (!isWeekView) _buildMonthNavigator(theme, statsProvider),
+        if (!isWeekView) const SizedBox(height: 8),
+        LineChartWidget(
+          data: data,
+          title: title,
+          isWeekView: isWeekView,
+        ),
+      ],
+    );
+  }
+
+  /// 月视图月份导航条
+  ///
+  /// - 上个月 / 下个月按钮，中间显示当前选中月份
+  /// - 下个月按钮在选中月 >= 当前月时禁用，避免查看无意义的未来月份
+  Widget _buildMonthNavigator(ThemeData theme, StatsProvider statsProvider) {
+    final selected = statsProvider.selectedMonth;
+    final now = DateTime.now();
+    final currentMonth = DateTime(now.year, now.month);
+    final canGoNext = selected.isBefore(currentMonth);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppTheme.radiusS),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // 上个月
+          IconButton(
+            icon: const Icon(Icons.chevron_left, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            tooltip: '上个月',
+            onPressed: () => statsProvider.previousMonth(),
+          ),
+          // 当前选中月份
+          Text(
+            '${selected.year} 年 ${selected.month} 月',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          // 下个月（不能超过当前月）
+          IconButton(
+            icon: const Icon(Icons.chevron_right, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            tooltip: canGoNext ? '下个月' : '已是最新月份',
+            onPressed: canGoNext ? () => statsProvider.nextMonth() : null,
+          ),
+        ],
+      ),
     );
   }
 

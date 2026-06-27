@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 严格模式辅助服务描述（显示在系统辅助功能设置页） -->
+    <string name="accessibility_service_desc">笔程严格模式：检测你切换到非白名单应用时自动返回专注计时，防止专注期间分心。</string>
+</resources>

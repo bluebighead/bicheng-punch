@@ -154,13 +154,13 @@ class TimerUtils {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _elapsedSeconds++;
 
+      // 先通知 UI 最新的计时值，再检查是否完成
+      onTick?.call(_elapsedSeconds);
+
       // 倒计时模式：检查是否到达目标
       if (_targetSeconds != null && _elapsedSeconds >= _targetSeconds!) {
         stop(forced: false);
-        return;
       }
-
-      onTick?.call(_elapsedSeconds);
     });
   }
 

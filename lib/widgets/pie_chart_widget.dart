@@ -58,12 +58,13 @@ class _PieChartWidgetState extends State<PieChartWidget> {
                 child: Column(
                   children: [
                     Text(
-                      '还没有数据',
+                      '暂无科目占比数据',
                       style: TextStyle(color: AppColors.textHint, fontSize: 14),
                     ),
-                    SizedBox(height: 4),
+                    SizedBox(height: 8),
                     Text(
-                      '开始专注学习后，这里会显示科目占比',
+                      '在专注计时中选择关联的习惯，\n学习时长才会按科目统计并显示图表',
+                      textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.textHint, fontSize: 12),
                     ),
                   ],
@@ -152,10 +153,18 @@ class _PieChartWidgetState extends State<PieChartWidget> {
           flex: 3,
           child: AspectRatio(
             aspectRatio: 1,
-            child: CustomPaint(
-              painter: PieChartPainter(
-                data: widget.data,
-                colors: _getChartColors(widget.data.length),
+            // 性能优化：RepaintBoundary 隔离饼图，主题切换时
+            // 仅当 theme.cardColor 变化才触发 painter 重绘
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: PieChartPainter(
+                  data: widget.data,
+                  colors: _getChartColors(widget.data.length),
+                  // 主题适配：分隔线/中心圆使用卡片色，避免深色模式下硬白刺眼
+                  centerColor: theme.cardColor,
+                  textColor: theme.textTheme.titleMedium?.color ??
+                      AppColors.textPrimary,
+                ),
               ),
             ),
           ),
@@ -344,9 +353,17 @@ class PieChartPainter extends CustomPainter {
   final Map<String, int> data;
   final List<Color> colors;
 
+  /// 中心圆与扇形分隔线颜色（原硬编码 Colors.white，深色模式下不适配）
+  final Color centerColor;
+
+  /// 中心总时长文字颜色
+  final Color textColor;
+
   PieChartPainter({
     required this.data,
     required this.colors,
+    required this.centerColor,
+    required this.textColor,
   });
 
   @override
@@ -380,8 +397,9 @@ class PieChartPainter extends CustomPainter {
         paint,
       );
 
+      // 分隔线使用主题中心色，深色模式下不再硬白刺眼
       final separatorPaint = Paint()
-        ..color = Colors.white
+        ..color = centerColor
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2;
 
@@ -398,7 +416,7 @@ class PieChartPainter extends CustomPainter {
 
     // 中心圆
     final centerCirclePaint = Paint()
-      ..color = Colors.white
+      ..color = centerColor
       ..style = PaintingStyle.fill;
     canvas.drawCircle(center, radius * 0.5, centerCirclePaint);
 
@@ -408,8 +426,9 @@ class PieChartPainter extends CustomPainter {
     final textPainter = TextPainter(
       text: TextSpan(
         text: hours > 0 ? '$hours小时' : '$minutes分钟',
-        style: const TextStyle(
-          color: AppColors.textPrimary,
+        // 使用传入的主题文本色
+        style: TextStyle(
+          color: textColor,
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
@@ -423,16 +442,12 @@ class PieChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant PieChartPainter oldDelegate) {
-    if (data.length != oldDelegate.data.length) return true;
-    final entries = data.entries.toList();
-    final oldEntries = oldDelegate.data.entries.toList();
-    for (int i = 0; i < entries.length; i++) {
-      if (entries[i].key != oldEntries[i].key ||
-          entries[i].value != oldEntries[i].value) {
-        return true;
-      }
-    }
-    return false;
+  bool shouldRepaint(PieChartPainter oldDelegate) {
+    // 性能优化：仅在数据/颜色/主题色变化时才重绘
+    // 原 shouldRepaint 返回 true，每次父级重建都重绘 → 主题切换时整页重绘
+    return data != oldDelegate.data ||
+        colors != oldDelegate.colors ||
+        centerColor != oldDelegate.centerColor ||
+        textColor != oldDelegate.textColor;
   }
 }

@@ -27,7 +27,10 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final habitProvider = context.watch<HabitProvider>();
+
+    // 性能优化：habitProvider 仅在补签弹窗中使用，用 context.read 按需读取
+    // checkInProvider 用 watch 订阅（checkIns 列表通过 .add() 原地修改，
+    // select 比较引用相等会漏检，故保留 watch 保证打卡状态实时刷新）
     final checkInProvider = context.watch<CheckInProvider>();
 
     // 获取当月所有打卡记录
@@ -37,6 +40,17 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
 
     // 计算当月打卡天数（去重）
     final checkedDates = monthCheckIns.map((c) => c.date.day).toSet();
+
+    // 预判休息日集合：一次性计算当月所有休息日，
+    // 避免每个单元格在 itemBuilder 中重复调用 isRestDay（原31次→1次循环）
+    final restDaySet = <int>{};
+    final daysInMonth = _getDaysInMonth();
+    for (var day = 1; day <= daysInMonth; day++) {
+      final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+      if (checkInProvider.isRestDay(date)) {
+        restDaySet.add(day);
+      }
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: AppTheme.pagePaddingH),
@@ -104,36 +118,37 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
 
           const SizedBox(height: 8),
 
-          // 日期网格
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1,
-            ),
-            itemCount: _getDaysInMonth(),
-            itemBuilder: (context, index) {
-              final day = index + 1;
-              final date = DateTime(_currentMonth.year, _currentMonth.month, day);
-              final isToday = _isToday(date);
-              final isChecked = checkedDates.contains(day);
-              final isRestDay = checkInProvider.isRestDay(date);
-              final isFuture = date.isAfter(DateTime.now());
+          // 日期网格 —— RepaintBoundary 隔离渲染层，
+          // 主题切换时仅当父级 Container 装饰变化才重绘网格
+          RepaintBoundary(
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 7,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1,
+              ),
+              itemCount: daysInMonth,
+              itemBuilder: (context, index) {
+                final day = index + 1;
+                final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+                final isToday = _isToday(date);
+                final isChecked = checkedDates.contains(day);
+                final isRestDay = restDaySet.contains(day);
+                final isFuture = date.isAfter(DateTime.now());
 
-              return _buildDayCell(
-                context,
-                date,
-                isToday,
-                isChecked,
-                isRestDay,
-                isFuture,
-                habitProvider,
-                checkInProvider,
-              );
-            },
+                return _buildDayCell(
+                  context,
+                  date,
+                  isToday,
+                  isChecked,
+                  isRestDay,
+                  isFuture,
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -141,6 +156,9 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
   }
 
   /// 构建单个日期单元格
+  ///
+  /// 性能优化：不再接收 provider 参数，点击事件中通过 context.read 按需读取，
+  /// 避免每个单元格订阅整个 provider。
   Widget _buildDayCell(
     BuildContext context,
     DateTime date,
@@ -148,8 +166,6 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
     bool isChecked,
     bool isRestDay,
     bool isFuture,
-    HabitProvider habitProvider,
-    CheckInProvider checkInProvider,
   ) {
     final theme = Theme.of(context);
 
@@ -177,10 +193,16 @@ class _MonthCalendarWidgetState extends State<MonthCalendarWidget> {
           _showLoginRequiredDialog();
           return;
         }
-        _showMakeupDialog(date, habitProvider, checkInProvider);
+        // 点击补签时按需读取 provider
+        _showMakeupDialog(
+          date,
+          context.read<HabitProvider>(),
+          context.read<CheckInProvider>(),
+        );
       };
     } else if (isRestDay) {
-      onTap = () => _showRestDayDialog(date, checkInProvider);
+      onTap = () =>
+          _showRestDayDialog(date, context.read<CheckInProvider>());
     }
 
     return GestureDetector(

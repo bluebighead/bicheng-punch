@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  严格模式辅助服务配置
+  - 监听窗口状态变化事件（TYPE_WINDOW_STATE_CHANGED）
+  - 仅需执行 GLOBAL_ACTION_BACK，无需检索窗口内容或手势
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_service_desc"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:notificationTimeout="100" />
